@@ -133,3 +133,6 @@ The test is a walk-forward: settings are tuned only on the years before each tes
 - Even after round-trip costs, the overnight bot loses badly: 250 trades a year × 0.06% each eats about 15% a year.
 
 If the rule is relaxed to "similar return, much smaller crashes" (for example, higher Sharpe and less than half SPY's worst drop on unseen years), the mix would pass.
+
+## Day-trading bots: on hold until there's more data
+Left unchanged in round 4. **Re-test them once `archive/` has 60+ trading days** (the archive started with 20 days on 2026-11-25 and grows by one every trading day, so around late January 2027). Run `node research/data.mjs && node research/lab.mjs && node research/check.mjs && node research/round3.mjs`, and only ship something that passes the ship rule and the 80% luck check.

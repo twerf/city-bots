@@ -2,7 +2,7 @@
 // then hands off to the next scheduled run (state on the `live` branch). Fake money only.
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { freshState, publicView, tick } from './city.mjs';
+import { freshState, publicView, tick, warmup, totalEquity } from './city.mjs';
 
 const REPO = process.env.REPO || 'twerf/city-bots';
 const TOKEN = process.env.GITHUB_TOKEN;
@@ -13,8 +13,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
 let S;
-try { S = JSON.parse(execFileSync('git', ['show', 'origin/live:state.json'], { encoding: 'utf8', maxBuffer: 64e6 })); log('loaded state, total', S.bots.reduce((a, b) => a + b.cash, 0).toFixed(4), 'cash'); }
-catch { S = freshState(); log('no saved state, starting fresh at $20'); }
+try { S = JSON.parse(execFileSync('git', ['show', 'origin/live:state.json'], { encoding: 'utf8', maxBuffer: 64e6 })); if (S.v !== 2) throw new Error('old format'); log('loaded state, total', totalEquity(S).toFixed(4)); }
+catch (e) { S = await fresh('no usable saved state (' + e.message.slice(0, 40) + ')'); }
+async function fresh(why) {
+  const s = freshState(); log(why, '-> fresh $20, warming up');
+  try { log('warmup scored', await warmup(s), 'past sessions'); } catch (e) { log('warmup failed', e.message); }
+  return s;
+}
 const st = { quotes: {}, err: null };
 
 async function checkReset() {
@@ -22,13 +27,13 @@ async function checkReset() {
     const r = await fetch(`https://api.github.com/repos/${REPO}/contents/reset.json?ref=main&t=${Date.now()}`, { headers: { Authorization: `Bearer ${TOKEN}`, Accept: 'application/vnd.github.raw+json', 'User-Agent': 'city-bots' } });
     if (!r.ok) return;
     const j = await r.json();
-    if (j.at && j.at > (S.resetAt || 0)) { S = freshState(); S.resetAt = j.at; log('RESET to $20 (requested', new Date(j.at).toISOString(), ')'); lastSig = ''; }
+    if (j.at && j.at > (S.resetAt || 0)) { S = await fresh('RESET requested ' + new Date(j.at).toISOString()); S.resetAt = j.at; lastSig = ''; }
   } catch (e) { log('reset check failed', e.message); }
 }
 
 // force-push a parentless commit to `live` so the branch never grows history
 const PUB = 'pub';
-let lastSig = '', lastPub = 0;
+var lastSig = '', lastPub = 0;
 function publish(force) {
   const view = publicView(S, st), sig = JSON.stringify({ ...view, at: 0 });
   if (!force && sig === lastSig && Date.now() - lastPub < 10 * 60000) return;
@@ -52,7 +57,7 @@ while (true) {
   const now = Date.now();
   if (n++ % 5 === 0) await checkReset();
   publish(false);
-  if (n % 15 === 1) log(st.open ? 'open' : 'closed', 'total', S.bots.reduce((a, b) => a + (b.pos ? b.pos.qty * b.pos.entry : b.cash), 0).toFixed(4), 'positions', S.bots.filter((b) => b.pos).length);
+  if (n % 15 === 1) log(st.open ? 'open' : 'closed', 'total', totalEquity(S).toFixed(4), 'positions', S.bots.filter((b) => b.pos).length, st.err || '');
   const holding = S.bots.some((b) => b.pos);
   if (st.closeAt && now >= st.closeAt + 60000 && !holding) { log('session over'); break; }
   if (st.openAt && now < st.openAt && st.openAt - now > PRE_OPEN_WAIT_MS) { log('too early, next open', new Date(st.openAt).toISOString()); break; }

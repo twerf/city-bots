@@ -44,9 +44,12 @@ export async function quotes(syms) {
 }
 async function pickContract(under, side, px, exp) {
   const type = side > 0 ? 'call' : 'put';
-  const j = await T(`/options/contracts?underlying_symbols=${under}&expiration_date=${exp}&type=${type}&strike_price_gte=${(px * 0.97).toFixed(2)}&strike_price_lte=${(px * 1.03).toFixed(2)}&limit=200`);
-  const c = (j.option_contracts || []).filter((x) => x.tradable !== false).sort((a, b) => Math.abs(a.strike_price - px) - Math.abs(b.strike_price - px))[0];
-  return c || null;
+  // next trading day's expiry; if that ticker has none (e.g. no daily expiries), the soonest one after it
+  const lte = new Date(Date.parse(exp) + 7 * 86400e3).toISOString().slice(0, 10);
+  const j = await T(`/options/contracts?underlying_symbols=${under}&expiration_date_gte=${exp}&expiration_date_lte=${lte}&type=${type}&strike_price_gte=${(px * 0.97).toFixed(2)}&strike_price_lte=${(px * 1.03).toFixed(2)}&limit=1000`);
+  const cs = (j.option_contracts || []).filter((x) => x.tradable !== false);
+  const first = cs.map((x) => x.expiration_date).sort()[0];
+  return cs.filter((x) => x.expiration_date === first).sort((a, b) => Math.abs(a.strike_price - px) - Math.abs(b.strike_price - px))[0] || null;
 }
 async function placeLimit(M, o) {
   const ord = await T('/orders', { method: 'POST', body: JSON.stringify({ symbol: o.sym, qty: String(o.qty), side: o.kind, type: 'limit', limit_price: o.limit.toFixed(2), time_in_force: 'day' }) });

@@ -54,6 +54,13 @@ else {
   L.push(`**Replay predicted:** ${P(pw)} for the same days.${avgGap != null ? ` Average daily difference ${P(avgGap).replace('+', '')}.` : ''} ${avgGap == null ? '' : avgGap < 0.002 ? 'Live matches the backtest well.' : avgGap < 0.006 ? 'Some drift (missed minutes or late GitHub runs).' : 'Big drift: live is not behaving like the backtest, worth a look.'}`);
   L.push(rows.map((r) => `\`${r.d}\` live ${P(r.live)} · predicted ${r.pred == null ? 'n/a' : P(r.pred)}`).join('\n'));
 }
+// mirror lane (Alpaca paper options)
+let MS = null; try { MS = JSON.parse(execFileSync('git', ['show', 'origin/live:mirror.json'], { encoding: 'utf8', maxBuffer: 64e6 })); } catch {}
+if (MS?.startEq) {
+  const md = (MS.days || []).filter((x) => Date.parse(x.d) >= Date.now() - 8 * 86400e3), mt = (MS.trades || []).filter((t) => t.out >= Date.now() - 8 * 86400e3);
+  const avg = (a) => (a?.length ? a.reduce((x, y) => x + y, 0) / a.length : null), allDays = (MS.days || []).map((x) => x.ret);
+  L.push(`**Mirror lane** (1-day options on Alpaca paper, fake $100k): this week ${P(growth(md.map((x) => x.ret)))}, ${mt.length} trades (${mt.filter((t) => t.pnl > 0).length} wins). Since start ${P(MS.lastEq / MS.startEq - 1)}${MS.spy0 && MS.lastSpy ? ` vs SPY ${P(MS.lastSpy / MS.spy0 - 1)}` : ''}. Avg bid/ask spread ${avg(MS.spreads) == null ? 'n/a' : (avg(MS.spreads) * 100).toFixed(1) + '%'}, avg fill vs mid ${avg(MS.slips) == null ? 'n/a' : P(avg(MS.slips))}. Luck check ${allDays.length >= 5 ? Math.round(pAboveZero(allDays) * 100) + '%' : 'needs 5+ days'}.`);
+}
 L.push(`**All data so far** (${D1.length} days of 1-min + ${D5.length} older 5-min days, fees included):`);
 L.push(`- 1-min days: bots ${P(growth(cur1))} (luck check ${Math.round(pAboveZero(cur1) * 100)}%), even split ${P(growth(ev1))}, hold SPY ${P(spy1)}, worst drop ${P(maxDD(cur1))}`);
 L.push(`- older days: bots ${P(growth(cur5))} (luck check ${Math.round(pAboveZero(cur5) * 100)}%), hold SPY ${P(spy5)}`);

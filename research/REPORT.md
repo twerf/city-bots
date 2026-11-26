@@ -136,3 +136,21 @@ If the rule is relaxed to "similar return, much smaller crashes" (for example, h
 
 ## Day-trading bots: on hold until there's more data
 Left unchanged in round 4. **Re-test them once `archive/` has 60+ trading days** (the archive started with 20 days on 2026-11-25 and grows by one every trading day, so around late January 2027). Run `node research/data.mjs && node research/lab.mjs && node research/check.mjs && node research/round3.mjs`, and only ship something that passes the ship rule and the 80% luck check.
+
+## Round 5: Mirror lane (Alpaca paper, live from 2026-11-27)
+This lane copies the reel's style with real paper fills: 1-day options on QQQ/SPY/IWM, triggered by our trend and opening-range signals.
+
+**Rules** (`mirror.mjs` RULES):
+- Each trade buys the at-the-money call or put expiring the next trading day.
+- Max 5% of the account per trade and max 3 open trades.
+- Option stop at −40%, target at +60%. Everything is flat 10 minutes before the close.
+- Daily lock at ±3% of the account.
+- Orders are limits at the mid price, canceled after 55 seconds. Exits that need to go through sell at the bid.
+
+**Safety:** the base URL is hard-coded to paper, and every tick checks that the account number starts with `PA`. The keys are stored only as repo secrets.
+
+**Verified** (`mirror-check.yml`): paper account, options level 3, chain and quotes work, and a $0.01 test order was placed and canceled.
+
+The lane runs inside the same Actions runner as the City. Its state is in `mirror.json` on `live`. It appears on the City tab and in the Friday report card, with the luck check, bid/ask spread and fill-vs-mid cost.
+
+Paper option fills are friendlier than real ones, so treat any paper edge as an upper bound.

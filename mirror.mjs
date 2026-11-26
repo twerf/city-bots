@@ -63,6 +63,7 @@ export async function mirrorTick(M) {
   M.lastEq = eq; if (M.startEq == null) M.startEq = eq;
   const clock = await T('/clock'), nowS = Date.now() / 1000, { day: today, min: m } = et(nowS);
   if (!clock.is_open) return;
+  const closeMin = et(Date.parse(clock.next_close) / 1000).min, flatAt = Math.min(RULES.flatMin, closeMin - 10), lastEntry = Math.min(RULES.lastEntryMin, closeMin - 30); // half days close at 1pm
   if (M.day !== today) {
     if (M.day) { M.days.push({ d: M.day, start: M.dayStartEq, end: eq, ret: r4(eq / M.dayStartEq - 1) }); M.days = M.days.slice(-250); }
     M.day = today; M.dayStartEq = +acct.last_equity || eq; M.locked = null; M.shadow = {}; say(M, 'new day', `account $${eq.toFixed(0)}`);
@@ -92,7 +93,7 @@ export async function mirrorTick(M) {
   for (const b of BOTS) {
     const bars = sess[b.sym]; if (!bars?.length) continue;
     M.shadow[b.id] ||= newBotDay(today);
-    stepBars(M.shadow[b.id], b, bars, indicators(bars), { closeMin: et(clock.next_close ? Date.parse(clock.next_close) / 1000 : nowS).min, prev: prev[b.sym], er, open: bars[0].o }, CFG, {
+    stepBars(M.shadow[b.id], b, bars, indicators(bars), { closeMin, prev: prev[b.sym], er, open: bars[0].o }, CFG, {
       open: (p) => { if (nowS - p.at <= RULES.signalMaxAgeSec) entries.push({ bot: b, side: p.side, why: p.why, px: p.entry }); },
       close: (tr) => { if (nowS - tr.out <= RULES.signalMaxAgeSec) exits.add(b.id); },
     });
@@ -105,9 +106,9 @@ export async function mirrorTick(M) {
     const x = q[p.sym]; if (!x || !x.bp) continue;
     const mid = (x.bp + x.ap) / 2; p.last = mid; const ret = mid / p.entry - 1;
     if (M.orders.some((o) => o.sym === p.sym && o.kind === 'sell')) continue;
-    const why = ret <= RULES.stop ? 'option stop (-40%)' : ret >= RULES.target ? 'option target (+60%)' : m >= RULES.flatMin ? 'end of day (3:50pm)' : M.locked ? M.locked : exits.has(p.bot) ? 'bot exit signal' : null;
+    const why = ret <= RULES.stop ? 'option stop (-40%)' : ret >= RULES.target ? 'option target (+60%)' : m >= flatAt ? 'end of day' : M.locked ? M.locked : exits.has(p.bot) ? 'bot exit signal' : null;
     if (!why) continue;
-    const aggressive = p.retry || m >= RULES.flatMin || why.includes('stop');
+    const aggressive = p.retry || m >= flatAt || why.includes('stop');
     await placeLimit(M, { kind: 'sell', sym: p.sym, under: p.under, side: p.side, bot: p.bot, qty: p.qty, limit: aggressive ? x.bp : r2(mid), mid, bid: x.bp, ask: x.ap, why });
   }
   // 4) entries
@@ -115,7 +116,7 @@ export async function mirrorTick(M) {
   const exp = await nextTradingDay(today);
   for (const e of entries) {
     const busy = Object.keys(M.open).length + M.orders.filter((o) => o.kind === 'buy').length;
-    const skip = M.locked ? M.locked : m >= RULES.lastEntryMin ? 'too late in the day' : busy >= RULES.maxOpen ? `already ${RULES.maxOpen} open` : null;
+    const skip = M.locked ? M.locked : m >= lastEntry ? 'too late in the day' : busy >= RULES.maxOpen ? `already ${RULES.maxOpen} open` : null;
     if (skip) { say(M, 'skip', `${e.bot.name} ${e.side > 0 ? 'call' : 'put'} signal: ${skip}`); continue; }
     const c = await pickContract(e.bot.sym, e.side, last[e.bot.sym] || e.px, exp);
     if (!c) { say(M, 'skip', `no ${exp} contract found for ${e.bot.sym}`); continue; }

@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { freshState, publicView, tick, warmup, totalEquity, VERSION, SHIPPED } from './city.mjs';
+import { mirrorEnabled, mirrorTick, mirrorView, freshMirror } from './mirror.mjs';
 
 const REPO = process.env.REPO || 'twerf/city-bots';
 const TOKEN = process.env.GITHUB_TOKEN;
@@ -21,6 +22,9 @@ async function fresh(why) {
   return s;
 }
 const st = { quotes: {}, err: null };
+// mirror lane (Alpaca paper options); its own state file on the live branch
+let MS = null;
+if (mirrorEnabled()) { try { MS = JSON.parse(execFileSync('git', ['show', 'origin/live:mirror.json'], { encoding: 'utf8', maxBuffer: 64e6 })); log('mirror state loaded'); } catch { MS = freshMirror(); log('mirror: fresh state'); } }
 
 async function checkReset() {
   try {
@@ -35,11 +39,12 @@ async function checkReset() {
 const PUB = 'pub';
 var lastSig = '', lastPub = 0;
 function publish(force) {
-  const view = publicView(S, st), sig = JSON.stringify({ ...view, at: 0 });
+  const view = { ...publicView(S, st), mirror: mirrorView(MS) }, sig = JSON.stringify({ ...view, at: 0 });
   if (!force && sig === lastSig && Date.now() - lastPub < 10 * 60000) return;
   fs.rmSync(PUB, { recursive: true, force: true }); fs.mkdirSync(PUB);
   fs.writeFileSync(`${PUB}/city.json`, JSON.stringify(view));
   fs.writeFileSync(`${PUB}/state.json`, JSON.stringify(S));
+  if (MS) fs.writeFileSync(`${PUB}/mirror.json`, JSON.stringify(MS));
   const g = (...a) => execFileSync('git', a, { cwd: PUB, stdio: ['ignore', 'ignore', 'pipe'] });
   g('init', '-q', '-b', 'live'); g('config', 'user.name', 'city-bots'); g('config', 'user.email', 'city-bots@users.noreply.github.com');
   g('add', '.'); g('commit', '-q', '-m', `city ${new Date().toISOString().slice(0, 16)}Z $${view.total.toFixed(4)}`);
@@ -54,11 +59,12 @@ let n = 0;
 while (true) {
   try { await tick(S, st); st.err = null; }
   catch (e) { st.err = String(e.message).slice(0, 200); log('tick error', st.err); }
+  if (MS && st.open) { try { await mirrorTick(MS); MS.err = null; } catch (e) { MS.err = String(e.message).slice(0, 200); log('mirror error', MS.err); } }
   const now = Date.now();
   if (n++ % 5 === 0) await checkReset();
   publish(false);
-  if (n % 15 === 1) log(st.open ? 'open' : 'closed', 'total', totalEquity(S).toFixed(4), 'positions', S.bots.filter((b) => b.pos).length, st.err || '');
-  const holding = S.bots.some((b) => b.pos);
+  if (n % 15 === 1) log(st.open ? 'open' : 'closed', 'total', totalEquity(S).toFixed(4), 'positions', S.bots.filter((b) => b.bs.pos).length, st.err || '');
+  const holding = S.bots.some((b) => b.bs.pos) || (MS && Date.now() < (st.closeAt || 0) + 600000 && (Object.keys(MS.open).length > 0 || MS.orders.length > 0));
   if (st.closeAt && now >= st.closeAt + 60000 && !holding) { log('session over'); break; }
   if (st.openAt && now < st.openAt && st.openAt - now > PRE_OPEN_WAIT_MS) { log('too early, next open', new Date(st.openAt).toISOString()); break; }
   if (now - T0 > MAX_MS) { log('time box reached, handing off to the next run'); break; }

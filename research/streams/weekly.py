@@ -19,7 +19,7 @@ json.dump(lb, open(LB, 'w', encoding='utf-8'), indent=1)
 def line(rs):
     if not rs: return None
     h = sum(r['60m'] > 0 for r in rs)
-    return f"{h}/{len(rs)} right after 1h ({round(100 * h / len(rs))}%), avg {st.mean(r['60m']):+.2f}%"
+    return f"{h}/{len(rs)} right after 1h ({round(100 * h / len(rs))}%), avg {st.mean([r['60m'] for r in rs]):+.2f}%"
 chans = sorted({c['channel'] for c in lb['calls']})
 out = ['**Streamer leaderboard** (rule-based, no AI: host calls like "I\'ll take Tesla puts", scored on the stock 1 hour later)']
 rank = []

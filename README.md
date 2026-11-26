@@ -4,7 +4,9 @@ Five practice trading bots on real market prices (Yahoo 1-minute bars) with fake
 
 - Bots: 17 tickers x 5 strategies (opening-range "OG", RSI fade, yesterday high/low breakout, gap fill, VWAP bounce) = 85 bots. Rules in `city.mjs`; live settings = `SHIPPED`. Every trade pays 0.02% slippage + 0.01% fees per side.
 - Adaptive: every bot trades every day in practice mode. Each morning bots are ranked on the last 10 sessions (steadiness score) and the money goes to the top 8, rank-weighted. Bots with 3 red days in a row are benched.
-- Research: `research/` (data cache, walk-forward lab, cross-check). Results in `research/REPORT.md`.
+- Research: `research/` (data cache, walk-forward lab, cross-check, sweeps, round3 checks). Results in `research/REPORT.md`.
+- Fills at the next minute's open. City tab also shows an "if these were options" estimate (display only).
+- `archive/`: one gzip file of 1-minute bars per trading day for 64 tickers, saved every evening by `.github/workflows/archive.yml`, so the test data keeps growing past Yahoo's 30-day limit.
 - Up bet / down bet = fractional ETF position, no leverage (stand-in for a call / put).
 - Daily: trades 9:30-4:00 ET, flat 5 min before the close, +2% profit lock / -3% loss limit per bot.
 - Runs on GitHub Actions (`.github/workflows/run.yml`): hourly weekday triggers, each run trades up to ~5h45m and hands off to the next.

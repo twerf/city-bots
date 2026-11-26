@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SYMS, BASE_CFG, botsFor, indicators, moodSeries, newBotDay, stepBars, flatten, pickFunded, hlc, splitDays, et } from '../city.mjs';
+import { SYMS, UNIVERSE, BASE_CFG, botsFor, indicators, moodSeries, newBotDay, stepBars, flatten, pickFunded, scanInPlay, hlc, splitDays, et } from '../city.mjs';
 import { load } from './data.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -12,17 +12,22 @@ export const WARM = 5, BLOCK = 3; // first 5 days only build track records; then
 const ALL7 = ['trend', 'og', 'fade', 'vwapb', 'pdhl', 'gap', 'pullback'];
 
 // ---------- data ----------
-export function buildDays(raw, barMin, minBars) {
-  const per = Object.fromEntries(SYMS.map((s) => [s, splitDays(raw[s])]));
+export function buildDays(raw, barMin, minBars, scanTop = 15) {
+  const syms = UNIVERSE.filter((s) => raw[s]?.length);
+  const per = Object.fromEntries(syms.map((s) => [s, splitDays(raw[s])]));
   const days = [...per.SPY.keys()].filter((d) => per.SPY.get(d).length >= minBars);
+  const n5 = Math.max(1, Math.round(5 / barMin));
   return days.map((d) => {
     const spy = per.SPY.get(d), er = moodSeries(spy, barMin), closeMin = et(spy.at(-1).t).min + barMin, out = { d, sym: {} };
     out.spyRet = spy.at(-1).c / spy[0].o - 1; out.spyClose = spy.at(-1).c; out.spyOpen = spy[0].o;
-    for (const s of SYMS) {
+    const rows = [];
+    for (const s of syms) {
       const bars = per[s].get(d); if (!bars?.length) continue;
-      const keys = [...per[s].keys()], k = keys.indexOf(d);
-      out.sym[s] = { bars, ind: indicators(bars), ctx: { closeMin, prev: k > 0 ? hlc(per[s].get(keys[k - 1])) : null, er, open: bars[0].o } };
+      const keys = [...per[s].keys()], k = keys.indexOf(d), prev = k > 0 ? hlc(per[s].get(keys[k - 1]), barMin) : null;
+      out.sym[s] = { bars, ind: indicators(bars), ctx: { closeMin, prev, er, open: bars[0].o } };
+      rows.push({ sym: s, o: bars[0].o, prev, v5: bars.slice(0, n5).reduce((a, b) => a + b.v, 0), hist: keys.slice(Math.max(0, k - 5), k).map((x) => per[s].get(x).slice(0, n5).reduce((a, b) => a + b.v, 0)) });
     }
+    out.scan = scanInPlay(rows, scanTop); out.inPlay = new Set(out.scan.map((r) => r.sym));
     return out;
   });
 }
@@ -33,28 +38,32 @@ const merge = (a, b) => ({ ...a, ...b, fund: { ...a.fund, ...(b.fund || {}) } })
 export function runCfg(cfg, D, tag) {
   const key = tag + JSON.stringify({ ...cfg, fund: undefined });
   if (cache.has(key)) return cache.get(key);
-  const bots = botsFor(cfg), R = Object.fromEntries(bots.map((b) => [b.id, []])), trades = [];
+  const bots = botsFor(cfg), R = Object.fromEntries(bots.map((b) => [b.id, []])), O = Object.fromEntries(bots.map((b) => [b.id, []])), trades = [];
   D.forEach((day, di) => {
     for (const b of bots) {
-      const e = day.sym[b.sym]; if (!e) { R[b.id].push(0); continue; }
-      const bs = newBotDay(day.d); stepBars(bs, b, e.bars, e.ind, e.ctx, cfg); flatten(bs, cfg);
-      R[b.id].push(bs.sv - 1);
-      for (const t of bs.trades) trades.push({ di, strat: b.strat, sym: b.sym, r: t.pct / 100 });
+      const e = day.sym[b.sym];
+      if (!e || (cfg.scan && !day.inPlay.has(b.sym))) { R[b.id].push(e ? null : 0); O[b.id].push(e ? null : 0); continue; }
+      const ctx = cfg.scan ? { ...e.ctx, inPlay: day.inPlay } : e.ctx;
+      const bs = newBotDay(day.d); stepBars(bs, b, e.bars, e.ind, ctx, cfg); flatten(bs, cfg, null, ctx);
+      R[b.id].push(bs.sv - 1); O[b.id].push(bs.ov - 1);
+      for (const t of bs.trades) trades.push({ di, strat: b.strat, sym: b.sym, r: t.pct / 100, o: t.opt / 100 });
     }
   });
-  const res = { bots, R, trades }; cache.set(key, res); return res;
+  const res = { bots, R, O, trades, cfg }; cache.set(key, res); return res;
 }
-// daily portfolio returns: each morning fund bots using only the days before
-export function portfolio(run, f, from, to) {
-  const out = [];
+// daily portfolio returns: each morning fund bots using only the days before. which = 'R' (real) or 'O' (options estimate)
+export function portfolio(run, f, from, to, D, which = 'R') {
+  const out = [], cfg = run.cfg;
   for (let di = from; di < to; di++) {
-    const w = pickFunded(run.bots, (b) => run.R[b.id].slice(0, di), f);
-    let r = 0; for (const [id, x] of w) r += x * run.R[id][di];
+    const elig = cfg.scan ? run.bots.filter((b) => D[di].inPlay.has(b.sym)) : run.bots;
+    const volOf = (b) => D[di].sym[b.sym]?.ctx.prev?.barRange;
+    const w = pickFunded(elig, (b) => run.R[b.id].slice(0, di), f, volOf);
+    let r = 0; for (const [id, x] of w) r += x * (run[which][id][di] ?? 0);
     out.push(r);
   }
   return out;
 }
-export const evenSplit = (run, from, to, filter = () => true) => { const bs = run.bots.filter(filter), out = []; for (let di = from; di < to; di++) out.push(bs.reduce((a, b) => a + run.R[b.id][di], 0) / bs.length); return out; };
+export const evenSplit = (run, from, to, filter = () => true) => { const bs = run.bots.filter(filter), out = []; for (let di = from; di < to; di++) { const v = bs.map((b) => run.R[b.id][di]).filter((x) => x != null); out.push(v.length ? v.reduce((a, x) => a + x, 0) / v.length : 0); } return out; };
 export const growth = (rs) => rs.reduce((a, r) => a * (1 + r), 1) - 1;
 const logSum = (rs) => rs.reduce((a, r) => a + Math.log(1 + r), 0);
 export function maxDD(rs) { let eq = 1, pk = 1, dd = 0; for (const r of rs) { eq *= 1 + r; pk = Math.max(pk, eq); dd = Math.min(dd, eq / pk - 1); } return dd; }
@@ -81,7 +90,7 @@ function apply(cfg, name) {
   return merge(cfg, t.c);
 }
 export const build = (names) => names.reduce(apply, BASE_CFG);
-export const portOf = (names, D, tag, from, to) => { const cfg = build(names); return cfg.strats.length ? portfolio(runCfg(cfg, D, tag), cfg.fund, from, to) : Array(to - from).fill(0); };
+export const portOf = (names, D, tag, from, to) => { const cfg = build(names); return cfg.strats.length ? portfolio(runCfg(cfg, D, tag), cfg.fund, from, to, D) : Array(to - from).fill(0); };
 
 // greedy: starting from the baseline, keep adding whichever idea helps most on the TRAIN days, until nothing helps
 function greedy(D, tag, from, to, log) {

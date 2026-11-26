@@ -6,9 +6,13 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = 3;
+export const VERSION = 4;
 const START_CASH = 20;
 export const SYMS = ['SPY', 'QQQ', 'IWM', 'DIA', 'SMH', 'XLK', 'XLF', 'XLE', 'ARKK', 'TLT', 'NVDA', 'TSLA', 'AAPL', 'AMD', 'META', 'AMZN', 'MSFT'];
+// wider list for the in-play scanner (liquid US stocks/ETFs)
+export const UNIVERSE = [...new Set([...SYMS, 'XLV', 'XLY', 'XLI', 'XLU', 'XLC', 'XBI', 'KRE', 'GLD', 'SLV', 'HYG', 'EEM', 'FXI', 'USO',
+  'GOOGL', 'NFLX', 'AVGO', 'MU', 'INTC', 'SMCI', 'PLTR', 'COIN', 'MSTR', 'UBER', 'SHOP', 'CRM', 'ORCL', 'ADBE', 'BA', 'JPM', 'BAC', 'GS', 'WFC',
+  'XOM', 'CVX', 'PFE', 'LLY', 'UNH', 'WMT', 'COST', 'HD', 'DIS', 'NKE', 'SBUX', 'MRNA', 'RIVN', 'SOFI', 'HOOD'])];
 export const SYM_INFO = {
   SPY: 'S&P 500, the 500 biggest US companies', QQQ: 'Nasdaq 100, mostly big tech', IWM: 'Russell 2000, small companies', DIA: 'Dow Jones, 30 old-school giants',
   SMH: 'chip makers', XLK: 'tech sector', XLF: 'banks and finance', XLE: 'oil and energy', ARKK: 'risky "future tech" fund', TLT: 'long-term US government bonds',
@@ -41,6 +45,9 @@ export const BASE_CFG = {
   maxTrades: 99, lossCool: 5,                 // max entries per bot per day, minutes to sit out after a loss
   amEnd: 675,                                 // end of the morning window (minutes after midnight ET, 675 = 11:15)
   gapMin: 0.003, rsiLo: 25,                   // gap-fill minimum gap; fade RSI trigger (rsiLo / 100-rsiLo)
+  fill: 'close',                              // 'close' = fill at the signal bar's close; 'next' = fill at the next bar's open (realistic)
+  syms: null, scan: 0,                        // ticker list (null = SYMS); scan>0 = only the top-N "in play" names trade each day
+  opt: { spread: 0.02, ivMult: 1.1 },         // options estimate (display only): bid/ask cost per side, implied vol vs realized
   lock: { up: 0.02, down: -0.03 },
   fund: { top: 8, window: 10, shrink: 3, score: 'mean', capTicker: 99, capCluster: 99, bench: 0, minScore: -1, weights: 'rank' },
 };
@@ -48,6 +55,7 @@ export const BASE_CFG = {
 // never saw (research/check.mjs). See research/REPORT.md for the numbers.
 export const SHIPPED = {
   ...BASE_CFG,
+  fill: 'next',      // realism: orders fill at the next minute's open (round 3; costs ~0.2% over a month vs instant fills)
   strats: ['og', 'fade', 'pdhl', 'gap', 'vwapb'], // trend bots dropped: ~87 trades/day, profit factor 0.6 after costs
   window: 'am',      // new entries only 9:45-11:15 (gap 9:35-10:00); open bets can still run until the exit
   confirm: true,     // breakout-type entries need above-average volume + the 5-min trend pointing the same way
@@ -55,7 +63,7 @@ export const SHIPPED = {
   fund: { ...BASE_CFG.fund, score: 'sharpe', bench: 3 }, // rank on steadiness, bench any bot after 3 red days in a row
 };
 
-export const botsFor = (cfg) => SYMS.flatMap((sym) => cfg.strats.map((strat) => ({ id: `${sym.toLowerCase()}-${strat}`, name: `${sym} ${SNAME[strat]}`, sym, strat })));
+export const botsFor = (cfg) => (cfg.syms || SYMS).flatMap((sym) => cfg.strats.map((strat) => ({ id: `${sym.toLowerCase()}-${strat}`, name: `${sym} ${SNAME[strat]}`, sym, strat })));
 
 // ---------- helpers ----------
 const ET = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
@@ -112,8 +120,18 @@ export function moodSeries(spy, barMin = 1) {
 }
 
 // ---------- the bot engine (shared by live + lab) ----------
-export const newBotDay = (day = null) => ({ day, pos: null, lock: null, cool: 0, n: 0, sv: 1, lastT: 0, og: {}, done: {}, sig: { dir: null, charge: 0, why: '' }, trades: [] });
+export const newBotDay = (day = null) => ({ day, pos: null, lock: null, cool: 0, n: 0, sv: 1, ov: 1, lastT: 0, og: {}, done: {}, pendEntry: null, pendExit: null, sig: { dir: null, charge: 0, why: '' }, trades: [] });
 const tradeRet = (p, px, c) => p.side * (px * (1 - p.side * c.slip) / p.fill - 1) - 2 * c.fee;
+// ---- options estimate (display only): what the same bet would have done as a 1-day-to-expiry at-the-money option.
+// Black-Scholes (r=0), strike = entry price, vol = yesterday's realized vol x ivMult, minus bid/ask on both sides.
+const ncdf = (x) => { const t = 1 / (1 + 0.2316419 * Math.abs(x)), d = 0.3989423 * Math.exp(-x * x / 2), p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274)))); return x > 0 ? 1 - p : p; };
+function bsPrice(side, S, K, T, v) { if (T <= 0) return Math.max(0, side * (S - K)); const sq = v * Math.sqrt(T), d1 = (Math.log(S / K) + 0.5 * v * v * T) / sq, d2 = d1 - sq; return side > 0 ? S * ncdf(d1) - K * ncdf(d2) : K * ncdf(-d2) - S * ncdf(-d1); }
+export function optionRet(p, exitPx, mOut, ctx, cfg) {
+  const v = (ctx.prev?.rv || 0.3) * (cfg.opt?.ivMult || 1.1), yr = 390 * 252, sp = cfg.opt?.spread ?? 0.02;
+  const T0 = (ctx.closeMin - p.mIn + 390) / yr, T1 = (ctx.closeMin - mOut + 390) / yr;
+  const prem = bsPrice(p.side, p.entry, p.entry, T0, v), val = bsPrice(p.side, exitPx, p.entry, T1, v);
+  return prem > 0 ? Math.max(-1, (val * (1 - sp)) / (prem * (1 + sp)) - 1) : 0;
+}
 export const markRet = (p, c) => (p ? tradeRet(p, p.last, c) : 0);
 
 function signal(strat, i, x, ind, bs, ctx) {
@@ -178,23 +196,28 @@ export function stepBars(bs, bot, bars, ind, ctx, cfg, ev = {}) {
   const C = cfg.cost;
   for (let i = 0; i < bars.length; i++) {
     const x = bars[i]; if (x.t <= bs.lastT) continue; bs.lastT = x.t;
-    const m = ind.m[i], px = x.c;
+    const m = ind.m[i], px = x.c, next = cfg.fill === 'next';
     if (bs.cool > 0) bs.cool--;
+    if (next) { // orders decided on the previous bar fill at this bar's open
+      if (bs.pendExit && bs.pos) { const why = bs.pendExit; bs.pendExit = null; closeTrade(bs, x.o, x.t, why, cfg, ev, ctx, m); }
+      if (bs.pendEntry && !bs.pos) { const e = bs.pendEntry; bs.pendEntry = null; if ((e.side > 0 ? x.o > e.stop : x.o < e.stop) && m < ctx.closeMin - 5) openPos(bs, e, x.o, x.t, m, ind.atr[i], cfg, ev); }
+    }
     if (m < 585) { bs.og.hi = Math.max(bs.og.hi ?? -Infinity, x.h); bs.og.lo = Math.min(bs.og.lo ?? Infinity, x.l); }
     const sg = signal(bot.strat, i, x, ind, bs, ctx); bs.sig = { dir: sg.dir, charge: r2(sg.charge), why: sg.why };
     if (bs.pos) {
       const p = bs.pos; p.last = px; p.best = p.side > 0 ? Math.max(p.best, x.h) : Math.min(p.best, x.l);
       let out = null, at = px;
-      if (m >= ctx.closeMin - 5) out = 'end of day';
-      else if (p.side > 0 ? x.l <= p.stop : x.h >= p.stop) { out = p.trailing ? 'trailing stop' : 'stop'; at = p.stop; }
-      else if (p.target != null && (p.side > 0 ? x.h >= p.target : x.l <= p.target)) { out = 'target'; at = p.target; }
+      let resting = false; // stops/targets are resting orders: they fill inside the bar (stop first if both are hit)
+      if (p.side > 0 ? x.l <= p.stop : x.h >= p.stop) { out = p.trailing ? 'trailing stop' : 'stop'; at = next && (p.side > 0 ? x.o < p.stop : x.o > p.stop) ? x.o : p.stop; resting = true; }
+      else if (p.target != null && (p.side > 0 ? x.h >= p.target : x.l <= p.target)) { out = 'target'; at = next && (p.side > 0 ? x.o > p.target : x.o < p.target) ? x.o : p.target; resting = true; }
+      else if (m >= ctx.closeMin - 5) out = 'end of day';
       else if (bot.strat === 'trend' && Math.sign(ind.e9[i] - ind.e21[i]) !== p.side && i > 0 && Math.sign(ind.e9[i - 1] - ind.e21[i - 1]) !== p.side) out = 'trend flipped';
       else if (bot.strat === 'fade' && (p.side > 0 ? px >= ind.vw[i] : px <= ind.vw[i])) out = 'back to VWAP';
-      if (out) { closeTrade(bs, at, x.t, out, cfg, ev); continue; }
+      if (out) { if (next && !resting) { bs.pendExit ||= out; continue; } closeTrade(bs, at, x.t, out, cfg, ev, ctx, m); continue; }
       if (cfg.trail > 0 && p.side * (p.best - p.entry) >= p.atr) { const ns = p.best - p.side * cfg.trail * p.atr; if (p.side > 0 ? ns > p.stop : ns < p.stop) { p.stop = ns; p.trailing = 1; } }
       continue;
     }
-    if (bs.lock || bs.cool > 0 || bs.n >= cfg.maxTrades) continue;
+    if (bs.lock || bs.cool > 0 || bs.n >= cfg.maxTrades || bs.pendEntry || (ctx.inPlay && !ctx.inPlay.has(bot.sym))) continue;
     const late = Math.min(ctx.closeMin - 30, 930);
     const inWin = bot.strat === 'gap' ? m >= 575 && m < 600
       : cfg.window === 'am' ? m >= 585 && m < cfg.amEnd : cfg.window === 'ampm' ? (m >= 585 && m < cfg.amEnd) || (m >= 870 && m < late) : m >= 585 && m < late;
@@ -205,33 +228,38 @@ export function stepBars(bs, bot, bars, ind, ctx, cfg, ev = {}) {
     if (cfg.mood) { const er = ctx.er?.get(x.t); if (er != null && (trendy ? er < cfg.moodTh : er >= cfg.moodTh)) continue; }
     if (cfg.confirm && trendy && (x.v < ind.av[i] || Math.sign(ind.e45[i] - ind.e105[i]) !== e.side)) continue;
     if (e.mark) bs.done[e.mark] = 1;
-    const target = cfg.trail > 0 && trendy ? null : e.target;
-    bs.pos = { side: e.side, entry: px, fill: px * (1 + e.side * C.slip), at: x.t, stop: e.stop, target, last: px, best: px, atr: ind.atr[i], why: e.why };
-    bs.n++; ev.open?.(bs.pos);
+    if (cfg.trail > 0 && trendy) e.target = null;
+    bs.n++;
+    if (next) bs.pendEntry = e; else openPos(bs, e, px, x.t, m, ind.atr[i], cfg, ev);
   }
 }
-function closeTrade(bs, px, t, why, cfg, ev) {
-  const p = bs.pos, r = tradeRet(p, px, cfg.cost), before = bs.sv;
-  bs.sv *= 1 + r; bs.pos = null; bs.cool = r < 0 ? Math.max(5, cfg.lossCool) : 5;
-  const tr = { side: p.side > 0 ? 'up' : 'down', entry: r4(p.entry), exit: r4(px), in: p.at, out: t, pct: r4(r * 100), why };
+function openPos(bs, e, px, t, m, atr, cfg, ev) {
+  bs.pos = { side: e.side, entry: px, fill: px * (1 + e.side * cfg.cost.slip), at: t, mIn: m, stop: e.stop, target: e.target, last: px, best: px, atr, why: e.why };
+  ev.open?.(bs.pos);
+}
+function closeTrade(bs, px, t, why, cfg, ev, ctx, m) {
+  const p = bs.pos, r = tradeRet(p, px, cfg.cost), before = bs.sv, obefore = bs.ov;
+  const o = ctx ? optionRet(p, px, m ?? ctx.closeMin, ctx, cfg) : 0;
+  bs.sv *= 1 + r; bs.ov *= 1 + o; bs.pos = null; bs.cool = r < 0 ? Math.max(5, cfg.lossCool) : 5;
+  const tr = { side: p.side > 0 ? 'up' : 'down', entry: r4(p.entry), exit: r4(px), in: p.at, out: t, pct: r4(r * 100), opt: r4(o * 100), why };
   bs.trades.push(tr);
   const g = bs.sv - 1;
   if (g >= cfg.lock.up) bs.lock = 'profit lock'; else if (g <= cfg.lock.down) bs.lock = 'loss limit';
-  ev.close?.(tr, r, before);
+  ev.close?.(tr, r, before, o, obefore);
 }
 // force-close anything still open (end of data)
-export function flatten(bs, cfg, ev) { if (bs.pos) closeTrade(bs, bs.pos.last, bs.lastT, 'end of day', cfg, ev || {}); }
+export function flatten(bs, cfg, ev, ctx) { bs.pendEntry = null; bs.pendExit = null; if (bs.pos) closeTrade(bs, bs.pos.last, bs.lastT, 'end of day', cfg, ev || {}, ctx, ctx?.closeMin); }
 
 // ---------- funding: who gets the money each morning ----------
 export function scoreBot(daily, f) {
-  const d = daily.slice(-f.window), n = d.length; if (!n) return 0;
+  const d = daily.filter((x) => x != null).slice(-f.window), n = d.length; if (!n) return 0;
   const mu = d.reduce((a, x) => a + x, 0) / n, sh = n / (n + f.shrink);
   if (f.score === 'sharpe') { const sd = Math.sqrt(d.reduce((a, x) => a + (x - mu) ** 2, 0) / n) + 0.002; return (mu / sd) * sh; }
   return mu * sh;
 }
 // returns Map(id -> fraction of the pool). Unused fractions stay in cash.
-export function pickFunded(bots, dailyOf, f) {
-  const sc = bots.map((b) => ({ b, d: dailyOf(b) })).map((x) => ({ ...x, s: scoreBot(x.d, f) }))
+export function pickFunded(bots, dailyOf, f, volOf) {
+  const sc = bots.map((b) => ({ b, d: dailyOf(b).filter((r) => r != null) })).map((x) => ({ ...x, s: scoreBot(x.d, f) }))
     .filter((x) => x.s > f.minScore && !(f.bench && x.d.length >= f.bench && x.d.slice(-f.bench).every((r) => r < 0)))
     .sort((a, b) => b.s - a.s || a.b.id.localeCompare(b.b.id));
   const pick = [], perT = {}, perC = {};
@@ -241,31 +269,50 @@ export function pickFunded(bots, dailyOf, f) {
     if ((perT[t] || 0) >= f.capTicker || (perC[c] || 0) >= f.capCluster) continue;
     perT[t] = (perT[t] || 0) + 1; perC[c] = (perC[c] || 0) + 1; pick.push(x.b);
   }
-  const N = f.top, W = (N * (N + 1)) / 2;
-  return new Map(pick.map((b, i) => [b.id, f.weights === 'equal' ? 1 / N : (N - i) / W]));
+  const N = f.top, W = (N * (N + 1)) / 2, base = pick.map((_, i) => (f.weights === 'equal' ? 1 / N : (N - i) / W));
+  if (f.size === 'risk' && volOf && pick.length) {
+    // risk-sized: scale each slice by (typical volatility / this ticker's volatility) so a stop-out costs about the
+    // same on every ticker. Same total money, no slice above 2x an even share, leftover stays in cash.
+    const vols = pick.map((b) => volOf(b) || null), known = vols.filter(Boolean).sort((a, b) => a - b), med = known[Math.floor(known.length / 2)];
+    if (med) {
+      const raw = base.map((w, i) => w * med / (vols[i] || med)), k = base.reduce((a, x) => a + x, 0) / raw.reduce((a, x) => a + x, 0);
+      return new Map(pick.map((b, i) => [b.id, Math.min(2 / N, raw[i] * k)]));
+    }
+  }
+  return new Map(pick.map((b, i) => [b.id, base[i]]));
+}
+// morning scanner: rank tickers by gap size (vs yesterday's range) + first-5-minute volume vs recent days; top N are "in play"
+export function scanInPlay(rows, top) {
+  const ok = rows.filter((r) => r.prev && r.o && r.v5 >= 0);
+  const g = ok.map((r) => ({ ...r, gapN: Math.abs(r.o - r.prev.c) / r.prev.c / Math.max(1e-3, (r.prev.h - r.prev.l) / r.prev.c), rvol: r.hist?.length ? r.v5 / Math.max(1, r.hist.reduce((a, x) => a + x, 0) / r.hist.length) : 1 }));
+  const rk = (k) => Object.fromEntries([...g].sort((a, b) => b[k] - a[k]).map((r, i) => [r.sym, i]));
+  const a = rk('gapN'), b = rk('rvol');
+  return g.sort((x, y) => a[x.sym] + b[x.sym] - (a[y.sym] + b[y.sym]) || x.sym.localeCompare(y.sym)).slice(0, top).map((r) => ({ sym: r.sym, gap: (r.o - r.prev.c) / r.prev.c, rvol: r.rvol }));
 }
 
 // ---------- live state ----------
 export function freshState(cfg = SHIPPED) {
-  return { v: VERSION, cfgKey: JSON.stringify(cfg), cfg, startCash: START_CASH, startedAt: Date.now(), cash: START_CASH, day: null, ranks: [],
-    bots: botsFor(cfg).map((b) => ({ ...b, alloc: 0, daily: [], bs: newBotDay(), trades: [] })), equity: [], log: [] };
+  return { v: VERSION, cfgKey: JSON.stringify(cfg), cfg, startCash: START_CASH, startedAt: Date.now(), cash: START_CASH, ocash: START_CASH, day: null, ranks: [],
+    bots: botsFor(cfg).map((b) => ({ ...b, alloc: 0, oalloc: 0, daily: [], bs: newBotDay(), trades: [] })), equity: [], oequity: [], log: [] };
 }
 export const botEquity = (S, b) => b.alloc * b.bs.sv * (1 + markRet(b.bs.pos, S.cfg.cost));
 export const totalEquity = (S) => S.cash + S.bots.reduce((a, b) => a + botEquity(S, b), 0);
+// options-view ledger (display only): same money split, each trade booked at its estimated option return. Closed trades only.
+export const optTotal = (S) => S.ocash + S.bots.reduce((a, b) => a + b.oalloc * b.bs.ov, 0);
 const dailyR = (b) => b.daily.map((x) => x.r);
 const recent = (b, w = 10) => b.daily.slice(-w).reduce((a, x) => a * (1 + x.r), 1) - 1;
 
 export function newDay(S, day, t) {
   if (S.day === day) return;
-  let pool = S.cash;
+  let pool = S.cash, opool = S.ocash ?? S.cash;
   for (const b of S.bots) {
     if (b.bs.pos) flatten(b.bs, S.cfg); // safety: nothing should be open overnight
     if (b.bs.day) { b.daily.push({ d: b.bs.day, r: r6(b.bs.sv - 1) }); b.daily = b.daily.slice(-30); }
-    pool += b.alloc * b.bs.sv; b.alloc = 0; b.bs = newBotDay(day);
+    pool += b.alloc * b.bs.sv; opool += (b.oalloc || 0) * b.bs.ov; b.alloc = 0; b.oalloc = 0; b.bs = newBotDay(day);
   }
   const w = pickFunded(S.bots, dailyR, S.cfg.fund);
-  let used = 0; for (const b of S.bots) if (w.has(b.id)) { b.alloc = pool * w.get(b.id); used += b.alloc; }
-  S.cash = pool - used; S.day = day;
+  let used = 0, oused = 0; for (const b of S.bots) if (w.has(b.id)) { b.alloc = pool * w.get(b.id); b.oalloc = opool * w.get(b.id); used += b.alloc; oused += b.oalloc; }
+  S.cash = pool - used; S.ocash = opool - oused; S.day = day;
   const f = S.bots.filter((b) => b.alloc > 0).sort((a, b) => b.alloc - a.alloc);
   S.ranks = f.map((b) => b.id);
   S.log.unshift({ t, kind: 'new day', why: f.length ? `money goes to ${f.slice(0, 3).map((b) => b.name).join(', ')}${f.length > 3 ? ` +${f.length - 3} more` : ''}${S.cash > 0.01 ? `, $${S.cash.toFixed(2)} sits in cash` : ''}` : 'no bot qualifies, all cash today' });
@@ -291,12 +338,20 @@ function playSession(S, sess, prevOf, closeMin, barMin = 1) {
     for (const b of S.bots) if (b.sym === s) stepBars(b.bs, b, bars, ind, ctx, S.cfg, evFor(S, b));
   }
 }
-export const hlc = (bars) => (bars?.length ? { h: Math.max(...bars.map((b) => b.h)), l: Math.min(...bars.map((b) => b.l)), c: bars.at(-1).c } : null);
+// yesterday's levels + realized volatility (annualized) + avg bar range %, from a session's bars
+export function hlc(bars, barMin = 1) {
+  if (!bars?.length) return null;
+  let s = 0, s2 = 0, n = 0, rg = 0;
+  for (let i = 1; i < bars.length; i++) { const r = Math.log(bars[i].c / bars[i - 1].c); s += r; s2 += r * r; n++; rg += (bars[i].h - bars[i].l) / bars[i].c; }
+  const sd = n > 1 ? Math.sqrt(Math.max(0, s2 / n - (s / n) ** 2)) : 0;
+  return { h: Math.max(...bars.map((b) => b.h)), l: Math.min(...bars.map((b) => b.l)), c: bars.at(-1).c, o: bars[0].o,
+    rv: Math.min(1.5, Math.max(0.12, sd * Math.sqrt((390 / barMin) * 252))), barRange: n ? rg / n : 0, v5: bars.slice(0, Math.max(1, Math.round(5 / barMin))).reduce((a, b) => a + b.v, 0) };
+}
 
 export function mark(S, last) {
   for (const b of S.bots) if (b.bs.pos && last[b.sym]) b.bs.pos.last = last[b.sym];
   const total = totalEquity(S), now = Date.now(), prev = S.equity[S.equity.length - 1];
-  if (!prev || now - prev.t >= 5 * 60000 || Math.abs(prev.v - total) > 1e-4) S.equity.push({ t: now, v: r4(total) });
+  if (!prev || now - prev.t >= 5 * 60000 || Math.abs(prev.v - total) > 1e-4) { S.equity.push({ t: now, v: r4(total) }); (S.oequity ||= []).push({ t: now, v: r4(optTotal(S)) }); }
   if (S.equity.length > 3000) S.equity = S.equity.filter((_, i) => i % 2 === 0 || i > S.equity.length - 500);
   return total;
 }
@@ -306,7 +361,7 @@ export async function warmup(S) {
   const data = await yahooAll(SYMS, '7d'), today = et(Date.now() / 1000).day;
   const days = Object.fromEntries(SYMS.map((s) => [s, data[s]?.bars ? splitDays(data[s].bars) : new Map()]));
   const list = [...days.SPY.keys()].filter((d) => d < today);
-  const cash = S.cash; S.cash = 0;
+  const cash = S.cash; S.cash = 0; S.ocash = 0;
   list.forEach((d, k) => {
     const sess = Object.fromEntries(SYMS.map((s) => [s, days[s].get(d) || []]));
     newDay(S, d, sess.SPY[0].t);
@@ -314,7 +369,8 @@ export async function warmup(S) {
     for (const b of S.bots) flatten(b.bs, S.cfg);
   });
   for (const b of S.bots) { b.trades = []; b.alloc = 0; }
-  S.cash = cash; S.day = null; S.log = [{ t: Date.now() / 1000, kind: 'warmed up', why: `scored every bot on the last ${list.length} sessions` }]; S.ranks = [];
+  for (const b of S.bots) b.oalloc = 0;
+  S.cash = cash; S.ocash = cash; S.day = null; S.log = [{ t: Date.now() / 1000, kind: 'warmed up', why: `scored every bot on the last ${list.length} sessions` }]; S.ranks = [];
   return list.length;
 }
 
@@ -322,7 +378,7 @@ export async function warmup(S) {
 export function publicView(S, st) {
   const f = S.cfg.fund, live = [...S.bots].sort((a, b) => scoreBot(dailyR(b), f) - scoreBot(dailyR(a), f) || a.id.localeCompare(b.id));
   const rank = Object.fromEntries(S.ranks.map((id, i) => [id, i + 1]));
-  return { v: VERSION, at: Date.now(), runner: 'github', open: st.open, next: st.next, closeAt: st.closeAt, err: st.err, startCash: S.startCash, startedAt: S.startedAt, total: r4(totalEquity(S)), idle: r4(S.cash),
+  return { v: VERSION, at: Date.now(), runner: 'github', open: st.open, next: st.next, closeAt: st.closeAt, err: st.err, startCash: S.startCash, startedAt: S.startedAt, total: r4(totalEquity(S)), idle: r4(S.cash), optTotal: r4(optTotal(S)), fill: S.cfg.fill,
     strats: Object.fromEntries(S.cfg.strats.map((k) => [k, STRATS[k]])), snames: SNAME, symInfo: SYM_INFO, fund: f, lock: S.cfg.lock, quotes: st.quotes, equity: S.equity.slice(-400), log: S.log.slice(0, 60),
     bots: S.bots.map((b) => { const p = b.bs.pos, eq = botEquity(S, b);
       return { id: b.id, name: b.name, sym: b.sym, strat: b.strat, rank: rank[b.id] || null, liveRank: live.indexOf(b) + 1, funded: b.alloc > 0, alloc: r4(b.alloc), equity: r4(eq),

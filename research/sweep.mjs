@@ -15,7 +15,7 @@ const S1 = { D: D1, tag: '1m', from: WARM }, S5 = { D: D5, tag: '5m', from: WARM
 const P = (x) => (x >= 0 ? '+' : '') + (x * 100).toFixed(2) + '%';
 const setp = (cfg, key, v) => { const c = structuredClone(cfg); const k = key.split('.'); let o = c; while (k.length > 1) o = o[k.shift()]; o[k[0]] = v; return c; };
 export function evalCfg(cfg, s) {
-  const run = runCfg(cfg, s.D, s.tag), p = portfolio(run, cfg.fund, s.from, s.D.length), e = evenSplit(run, s.from, s.D.length);
+  const run = runCfg(cfg, s.D, s.tag), p = portfolio(run, cfg.fund, s.from, s.D.length, s.D), e = evenSplit(run, s.from, s.D.length);
   return { port: growth(p), dd: maxDD(p), even: growth(e), spy: spyHold(s.D, s.from, s.D.length) };
 }
 const GRID = {

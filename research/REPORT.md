@@ -74,3 +74,27 @@ Each setting was swept one at a time around the shipped values. Picks used a nei
 
 ### Ship rule
 The new bots beat the old bots and the even split on unseen days, with a smaller worst drop. They did **not** beat buy-and-hold SPY on the unseen days, because the market rose in that stretch. v3 stays live as the better of the two bot versions, but under the strict rule it doesn't pass.
+
+## Round 3 (`round3.mjs`): realistic fills, luck check, scanner, risk sizing, options view
+Datasets: the 1-minute month (15 test days after a 5-day warm-up) and 35 older 5-minute days. None of the round-3 changes were tuned on either one. The universe grew to 64 tickers, and the 1-minute bars now come from `archive/` merged with Yahoo.
+
+| | 1-min month | older 5-min days |
+|---|---|---|
+| current, fills at signal close | $20.52 (luck check 79%) | $20.08 (62%) |
+| **current, next-bar fills (shipped)** | **$20.47 (77%)** | **$20.07 (61%)** |
+| + risk-sized bets | $20.17 (67%) | $20.04 (57%) |
+| + scanner (top 15 of 64) | $20.21 (72%) | $19.19 (0%) |
+| control: all 64 tickers, no scanner | $20.52 (78%) | $20.01 (51%) |
+| + scanner + risk-sized | $19.98 (48%) | $19.29 (0%) |
+| hold SPY | $18.73 | $20.38 |
+| options view (estimate) | $17.90 (worst drop −51%) | $11.62 (worst drop −73%) |
+
+### What each change did
+- **Realistic fills** (next bar's open; stop first when a bar hits both): about −0.05 to −0.2 percentage points over a month. Shipped as a realism fix, not as an improvement.
+- **Luck check** (5,000 bootstrap resamples): **every result is under 80%**, so none of it can be told apart from luck yet. These strategies have at least 30 trades: og, fade, gap, and pdhl on the 1-minute month. vwapb (28 / 0 trades) and pdhl on the older days (26) are too thin to trust.
+- **Scanner:** worse on both datasets, and very bad on the older days. In-play names rotate daily, so the bots that get funded have almost no track record, and the gap bots on big-gap days lost. The all-64 control shows that simply adding tickers doesn't help either. **Not shipped.**
+- **Risk-sized bets:** smaller worst drop but lower return on both datasets. **Not shipped.**
+- **Options view:** the same bets as 1-day-to-expiry options (Black-Scholes estimate, vol = yesterday's realized × 1.1, 2% bid/ask each side) **lose money on both datasets**, with drops of 50-70%. A small stock edge doesn't survive options' time decay plus spreads. Shipped as a display-only number on the City tab.
+- **Archive:** `archive.yml` saves every ticker's 1-minute bars each evening. It was seeded with the last 20 sessions (~340 KB/day).
+
+**Ship check:** no strategy change passed. Only the realism fix (next-bar fills) and the display-only options view were shipped.

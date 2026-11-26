@@ -106,3 +106,30 @@ Runs on Fridays at 22:15 UTC. Each run:
 - posts to Discord #city-bots through the `DISCORD_WEBHOOK` repo secret
 
 Ideas are only *suggested* when they beat the current bots on both datasets and pass a luck check of at least 80%. Nothing is ever shipped automatically.
+
+## Round 4: the "slow lane" (`slow.mjs`, daily bars 1993-2026)
+These are daily strategies, each one a separate bot, using dividend-adjusted Yahoo daily bars. Fills happen at the next day's open (the overnight bot buys at the close and sells at the next open), with the same costs as the day-trading bots.
+
+The test is a walk-forward: settings are tuned only on the years before each test year, and the test years are 2005-2026 (5,510 unseen days). The luck check is a 20-day-block bootstrap.
+
+| bot | per year | worst drop | trades/yr | win | PF | beats-SPY luck | 2008 | 2020 | 2022 |
+|---|---|---|---|---|---|---|---|---|---|
+| Hold SPY | +10.5% | −55.2% | 0 | – | – | – | −36.8% | +18.3% | −18.2% |
+| QQQ trend (200-day avg) | +9.5% | −27.0% | 4 | 36% | 3.71 | 36% | −16.5% | +31.1% | −12.8% |
+| Momentum rotation (top 3 ETFs) | +8.9% | −27.7% | 12 | 54% | 2.30 | 30% | −10.9% | +20.5% | −8.7% |
+| Mix of best low-overlap bots | +8.2% | **−18.6%** | – | – | – | 21% | **+5.6%** | +7.3% | −4.2% |
+| SPY trend | +6.7% | −25.5% | 3 | 32% | 3.42 | 8% | −0.9% | −0.9% | −14.3% |
+| Mix + volatility targeting | +6.6% | −14.1% | – | – | – | 9% | +2.6% | +8.4% | −4.5% |
+| Even split of all slow bots | +5.5% | −21.2% | – | – | – | 1% | −9.6% | +9.4% | −9.8% |
+| QQQ dip buying | +4.8% | −12.5% | 11 | 64% | 2.02 | 9% | +28.5% | +1.1% | +10.7% |
+| SPY dip buying | +2.8% | −27.1% | 17 | 63% | 1.39 | 1% | 0.0% | −6.1% | +0.7% |
+| Overnight | −6.8% | −80.8% | 250 | 50% | 0.89 | 0% | −26.0% | −1.6% | −25.5% |
+
+**Ship check: NOTHING PASSES.** No slow bot beat simply holding SPY on return with at least 80% luck-check confidence, so the slow lane was not added to the live City.
+
+**What it does show:**
+- Every trend/rotation bot and both mixes are profitable beyond luck (luck check of 98-100% that the return is above zero).
+- **The low-overlap mix earned about 80% of SPY's return with about a third of the worst crash.** It was +5.6% in 2008 while SPY fell 37%. Its Sharpe was 0.78 vs SPY's 0.62.
+- Even after round-trip costs, the overnight bot loses badly: 250 trades a year × 0.06% each eats about 15% a year.
+
+If the rule is relaxed to "similar return, much smaller crashes" (for example, higher Sharpe and less than half SPY's worst drop on unseen years), the mix would pass.

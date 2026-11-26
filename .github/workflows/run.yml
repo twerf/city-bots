@@ -1,0 +1,31 @@
+name: city bots
+on:
+  schedule:
+    # hourly on weekdays across the US session (covers EST and EDT). Runs queue up behind each other,
+    # each one trades up to ~5h45m, and runs outside market hours exit in seconds.
+    - cron: '5 13-20 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      max_min:
+        description: 'max minutes for this run'
+        default: '345'
+permissions:
+  contents: write
+concurrency:
+  group: city
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - run: git fetch -q origin live || true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node run.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          MAX_MIN: ${{ inputs.max_min || '345' }}

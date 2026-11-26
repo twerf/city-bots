@@ -1,0 +1,19 @@
+[
+ {"channel": "SmartAction Trading", "day": "2026-11-20", "time": "09:57", "sym": "AMZN", "dir": 1, "who": "host", "said": "Took Amazon. Beautiful job"},
+ {"channel": "SmartAction Trading", "day": "2026-11-23", "time": "09:48", "sym": "AMD", "dir": -1, "who": "signal", "said": "AMD put signal... if you take the puts", "claim": "100% AMD"},
+ {"channel": "SmartAction Trading", "day": "2026-11-23", "time": "09:50", "sym": "WMT", "dir": 1, "who": "host", "said": "I took the Walmart (calls)", "claim": "said: stopped out"},
+ {"channel": "SmartAction Trading", "day": "2026-11-23", "time": "10:13", "sym": "TSLA", "dir": 1, "who": "host", "said": "I'll take Tesla right there for the calls", "claim": "said: worked out"},
+ {"channel": "SmartAction Trading", "day": "2026-11-23", "time": "10:51", "sym": "TSLA", "dir": 1, "who": "host", "said": "I'm going Tesla calls", "claim": "said: worked out"},
+ {"channel": "SmartAction Trading", "day": "2026-11-24", "time": "09:46", "sym": "SPY", "dir": 1, "who": "host", "said": "you took spy on that break", "claim": "said: nice scalp"},
+ {"channel": "SmartAction Trading", "day": "2026-11-24", "time": "10:15", "sym": "MSFT", "dir": 1, "who": "host", "said": "we took Microsoft"},
+ {"channel": "SmartAction Trading", "day": "2026-11-24", "time": "10:21", "sym": "AAPL", "dir": 1, "who": "host", "said": "I'm in the Apple calls", "claim": "said: stopped out -34%"},
+ {"channel": "SmartAction Trading", "day": "2026-11-24", "time": "10:24", "sym": "TSLA", "dir": -1, "who": "host", "said": "we got the puts on Tesla"},
+ {"channel": "SmartAction Trading", "day": "2026-11-24", "time": "10:29", "sym": "AMZN", "dir": 1, "who": "host", "said": "I'm in the Amazon calls", "claim": "said: +12%, all out"},
+ {"channel": "SmartAction Trading", "day": "2026-11-25", "time": "09:52", "sym": "TSLA", "dir": -1, "who": "host", "said": "I'll take Tesla puts right there", "claim": "said: stopped out -36%"},
+ {"channel": "SmartAction Trading", "day": "2026-11-25", "time": "10:02", "sym": "IWM", "dir": -1, "who": "host", "said": "second trade, small caps (puts)"},
+ {"channel": "SmartAction Trading", "day": "2026-11-25", "time": "10:22", "sym": "AAPL", "dir": -1, "who": "host", "said": "Took Apple to the downside"},
+ {"channel": "SmartAction Trading", "day": "2026-11-25", "time": "10:51", "sym": "AMZN", "dir": -1, "who": "signal", "said": "One DTE Amazon puts shockwave 60"},
+ {"channel": "TraderTV Live", "day": "2026-11-25", "time": "10:46", "sym": "SMCI", "dir": -1, "who": "host", "said": "we're short this (SMCI)"},
+ {"channel": "TraderTV Live", "day": "2026-11-25", "time": "12:06", "sym": "SPY", "dir": 1, "who": "host", "said": "Great spy right now. We're going long", "claim": "said: great trade"},
+ {"channel": "TraderTV Live", "day": "2026-11-25", "time": "14:37", "sym": "GOOGL", "dir": -1, "who": "host", "said": "Actually, I'm short Google", "claim": "said: covered when it got bought up"}
+]

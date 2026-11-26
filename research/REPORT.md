@@ -50,3 +50,27 @@ The shipped settings trade about 3x less and roughly halve the worst drop. They'
 - **Funding:** the top 8, ranked on a steadiness score (return ÷ volatility). Any bot with 3 red days in a row is benched.
 
 Re-run everything: `node research/data.mjs --refresh && node research/lab.mjs && node research/check.mjs`
+
+## Round 2: parameter sweeps + ship check (`sweep.mjs`, `replay.mjs`)
+Each setting was swept one at a time around the shipped values. Picks used a neighbour-smoothed score on the 1-minute month, then were checked on the older 5-minute days.
+
+### Sweep results
+- **Flat plateaus.** The shipped values sit on these, so there's nothing to tune:
+  - profit lock (1-5%)
+  - shrink
+  - bench length
+  - max trades 2-6
+- **Morning-window end:** 630-780 all land between about +1.7% and +3.5% on the 1-minute month and 0 to +0.7% on the older days. The 11:15 end is mid-plateau.
+- **Gap minimum:** 0.2-0.3% is fine; 0.4%+ is worse on the older days. Kept 0.3%.
+- **Fade RSI:** 20/25/30 are all similar. Kept 25.
+- **Funded bot count:** fewer funded bots means bigger swings both ways. Top 4 makes more but has a bigger worst drop (−2.2% vs −1.4%); it's a risk choice, not an edge. Kept 8.
+- **Ranking window:** 15 days was best on the 1-minute month but ~0% on the older days. Kept 10.
+- **Cluster caps (max 2 per ticker, 2-3 per group):** helped one dataset and hurt the other. Not shipped.
+- **Combining every individual sweep winner:** +8.1% on the 1-minute month, but **−0.6%** on the older days, vs +0.4% for the shipped settings. That's overfitting in action. **No sweep changes shipped.**
+
+### Month replay ($20, rank-funded top 8, costs included)
+- **1-minute month** (ideas were picked here): old bots $20.50, new bots $20.52. Even split $19.68, SPY $18.73.
+- **Older 5-minute days** (never tuned on): old bots $19.91, new bots $20.09. Even split $19.66, **SPY $20.38**.
+
+### Ship rule
+The new bots beat the old bots and the even split on unseen days, with a smaller worst drop. They did **not** beat buy-and-hold SPY on the unseen days, because the market rose in that stretch. v3 stays live as the better of the two bot versions, but under the strict rule it doesn't pass.

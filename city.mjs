@@ -39,6 +39,8 @@ export const BASE_CFG = {
   confirm: false,                             // trend-type entries need above-avg volume + the 5-min trend agreeing
   mood: false, moodTh: 0.2,                   // trend-type bots only when SPY is trending, fade/gap only when it's choppy
   maxTrades: 99, lossCool: 5,                 // max entries per bot per day, minutes to sit out after a loss
+  amEnd: 675,                                 // end of the morning window (minutes after midnight ET, 675 = 11:15)
+  gapMin: 0.003, rsiLo: 25,                   // gap-fill minimum gap; fade RSI trigger (rsiLo / 100-rsiLo)
   lock: { up: 0.02, down: -0.03 },
   fund: { top: 8, window: 10, shrink: 3, score: 'mean', capTicker: 99, capCluster: 99, bench: 0, minScore: -1, weights: 'rank' },
 };
@@ -145,8 +147,8 @@ function entry(strat, i, x, bars, ind, bs, ctx, cfg) {
   }
   if (strat === 'fade') {
     const dv = (px - vw) / vw;
-    if (rsi < 25 && dv < -0.002) return { side: 1, why: `oversold (RSI ${rsi.toFixed(0)})`, ...lv(1, 0.0025, 0.003) };
-    if (rsi > 75 && dv > 0.002) return { side: -1, why: `overbought (RSI ${rsi.toFixed(0)})`, ...lv(-1, 0.0025, 0.003) };
+    if (rsi < cfg.rsiLo && dv < -0.002) return { side: 1, why: `oversold (RSI ${rsi.toFixed(0)})`, ...lv(1, 0.0025, 0.003) };
+    if (rsi > 100 - cfg.rsiLo && dv > 0.002) return { side: -1, why: `overbought (RSI ${rsi.toFixed(0)})`, ...lv(-1, 0.0025, 0.003) };
   }
   if (strat === 'vwapb' && i >= 30) {
     let above = 0; for (let j = i - 30; j < i; j++) if (bars[j].c > ind.vw[j]) above++;
@@ -161,7 +163,7 @@ function entry(strat, i, x, bars, ind, bs, ctx, cfg) {
   }
   if (strat === 'gap' && ctx.prev && !bs.done.gap) {
     const g = (ctx.open - ctx.prev.c) / ctx.prev.c, side = g > 0 ? -1 : 1;
-    if (Math.abs(g) >= 0.003 && Math.abs(g) <= 0.02 && side * (ctx.prev.c - px) > 0) return { side, why: `${g > 0 ? 'gapped up' : 'gapped down'} ${(Math.abs(g) * 100).toFixed(1)}%, betting it fills`, stop: px - side * Math.abs(g) * ctx.prev.c * 0.5, target: ctx.prev.c, mark: 'gap' };
+    if (Math.abs(g) >= cfg.gapMin && Math.abs(g) <= 0.02 && side * (ctx.prev.c - px) > 0) return { side, why: `${g > 0 ? 'gapped up' : 'gapped down'} ${(Math.abs(g) * 100).toFixed(1)}%, betting it fills`, stop: px - side * Math.abs(g) * ctx.prev.c * 0.5, target: ctx.prev.c, mark: 'gap' };
   }
   if (strat === 'pullback' && bs.og.hi && !bs.done.pb && i > 0) {
     const upMove = (bs.og.hi - ctx.open) / ctx.open, dnMove = (ctx.open - bs.og.lo) / ctx.open;
@@ -195,7 +197,7 @@ export function stepBars(bs, bot, bars, ind, ctx, cfg, ev = {}) {
     if (bs.lock || bs.cool > 0 || bs.n >= cfg.maxTrades) continue;
     const late = Math.min(ctx.closeMin - 30, 930);
     const inWin = bot.strat === 'gap' ? m >= 575 && m < 600
-      : cfg.window === 'am' ? m >= 585 && m < 675 : cfg.window === 'ampm' ? (m >= 585 && m < 675) || (m >= 870 && m < late) : m >= 585 && m < late;
+      : cfg.window === 'am' ? m >= 585 && m < cfg.amEnd : cfg.window === 'ampm' ? (m >= 585 && m < cfg.amEnd) || (m >= 870 && m < late) : m >= 585 && m < late;
     if (!inWin) continue;
     const e = entry(bot.strat, i, x, bars, ind, bs, ctx, cfg);
     if (!e) continue;

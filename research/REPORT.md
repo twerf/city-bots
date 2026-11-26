@@ -98,3 +98,11 @@ Datasets: the 1-minute month (15 test days after a 5-day warm-up) and 35 older 5
 - **Archive:** `archive.yml` saves every ticker's 1-minute bars each evening. It was seeded with the last 20 sessions (~340 KB/day).
 
 **Ship check:** no strategy change passed. Only the realism fix (next-bar fills) and the display-only options view were shipped.
+
+## Weekly report card (`weekly.mjs`, `.github/workflows/weekly.yml`)
+Runs on Fridays at 22:15 UTC. Each run:
+- compares the live paper days (`state.days`, new in state v5) with the replay engine's prediction for the same days, using the archive + Yahoo data
+- re-runs the research on all data so far: bots vs even split vs SPY, luck check, and each idea applied alone to the shipped settings
+- posts to Discord #city-bots through the `DISCORD_WEBHOOK` repo secret
+
+Ideas are only *suggested* when they beat the current bots on both datasets and pass a luck check of at least 80%. Nothing is ever shipped automatically.

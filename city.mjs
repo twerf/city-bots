@@ -6,7 +6,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = 4;
+export const VERSION = 5;
 const START_CASH = 20;
 export const SYMS = ['SPY', 'QQQ', 'IWM', 'DIA', 'SMH', 'XLK', 'XLF', 'XLE', 'ARKK', 'TLT', 'NVDA', 'TSLA', 'AAPL', 'AMD', 'META', 'AMZN', 'MSFT'];
 // wider list for the in-play scanner (liquid US stocks/ETFs)
@@ -292,7 +292,7 @@ export function scanInPlay(rows, top) {
 
 // ---------- live state ----------
 export function freshState(cfg = SHIPPED) {
-  return { v: VERSION, cfgKey: JSON.stringify(cfg), cfg, startCash: START_CASH, startedAt: Date.now(), cash: START_CASH, ocash: START_CASH, day: null, ranks: [],
+  return { v: VERSION, cfgKey: JSON.stringify(cfg), cfg, startCash: START_CASH, startedAt: Date.now(), cash: START_CASH, ocash: START_CASH, day: null, dayStart: START_CASH, ranks: [], days: [],
     bots: botsFor(cfg).map((b) => ({ ...b, alloc: 0, oalloc: 0, daily: [], bs: newBotDay(), trades: [] })), equity: [], oequity: [], log: [] };
 }
 export const botEquity = (S, b) => b.alloc * b.bs.sv * (1 + markRet(b.bs.pos, S.cfg.cost));
@@ -310,9 +310,11 @@ export function newDay(S, day, t) {
     if (b.bs.day) { b.daily.push({ d: b.bs.day, r: r6(b.bs.sv - 1) }); b.daily = b.daily.slice(-30); }
     pool += b.alloc * b.bs.sv; opool += (b.oalloc || 0) * b.bs.ov; b.alloc = 0; b.oalloc = 0; b.bs = newBotDay(day);
   }
+  // close the books on the previous session (live results, used by the weekly report card)
+  if (S.day) { S.days ||= []; S.days.push({ d: S.day, start: r6(S.dayStart ?? pool), end: r6(pool), ret: r6(pool / (S.dayStart || pool) - 1), funded: S.ranks.slice() }); S.days = S.days.slice(-120); }
   const w = pickFunded(S.bots, dailyR, S.cfg.fund);
   let used = 0, oused = 0; for (const b of S.bots) if (w.has(b.id)) { b.alloc = pool * w.get(b.id); b.oalloc = opool * w.get(b.id); used += b.alloc; oused += b.oalloc; }
-  S.cash = pool - used; S.ocash = opool - oused; S.day = day;
+  S.cash = pool - used; S.ocash = opool - oused; S.day = day; S.dayStart = pool;
   const f = S.bots.filter((b) => b.alloc > 0).sort((a, b) => b.alloc - a.alloc);
   S.ranks = f.map((b) => b.id);
   S.log.unshift({ t, kind: 'new day', why: f.length ? `money goes to ${f.slice(0, 3).map((b) => b.name).join(', ')}${f.length > 3 ? ` +${f.length - 3} more` : ''}${S.cash > 0.01 ? `, $${S.cash.toFixed(2)} sits in cash` : ''}` : 'no bot qualifies, all cash today' });
@@ -370,7 +372,7 @@ export async function warmup(S) {
   });
   for (const b of S.bots) { b.trades = []; b.alloc = 0; }
   for (const b of S.bots) b.oalloc = 0;
-  S.cash = cash; S.ocash = cash; S.day = null; S.log = [{ t: Date.now() / 1000, kind: 'warmed up', why: `scored every bot on the last ${list.length} sessions` }]; S.ranks = [];
+  S.cash = cash; S.ocash = cash; S.dayStart = cash; S.days = []; S.day = null; S.log = [{ t: Date.now() / 1000, kind: 'warmed up', why: `scored every bot on the last ${list.length} sessions` }]; S.ranks = [];
   return list.length;
 }
 
@@ -378,7 +380,7 @@ export async function warmup(S) {
 export function publicView(S, st) {
   const f = S.cfg.fund, live = [...S.bots].sort((a, b) => scoreBot(dailyR(b), f) - scoreBot(dailyR(a), f) || a.id.localeCompare(b.id));
   const rank = Object.fromEntries(S.ranks.map((id, i) => [id, i + 1]));
-  return { v: VERSION, at: Date.now(), runner: 'github', open: st.open, next: st.next, closeAt: st.closeAt, err: st.err, startCash: S.startCash, startedAt: S.startedAt, total: r4(totalEquity(S)), idle: r4(S.cash), optTotal: r4(optTotal(S)), fill: S.cfg.fill,
+  return { v: VERSION, at: Date.now(), runner: 'github', open: st.open, next: st.next, closeAt: st.closeAt, err: st.err, startCash: S.startCash, startedAt: S.startedAt, total: r4(totalEquity(S)), idle: r4(S.cash), optTotal: r4(optTotal(S)), fill: S.cfg.fill, days: (S.days || []).slice(-10),
     strats: Object.fromEntries(S.cfg.strats.map((k) => [k, STRATS[k]])), snames: SNAME, symInfo: SYM_INFO, fund: f, lock: S.cfg.lock, quotes: st.quotes, equity: S.equity.slice(-400), log: S.log.slice(0, 60),
     bots: S.bots.map((b) => { const p = b.bs.pos, eq = botEquity(S, b);
       return { id: b.id, name: b.name, sym: b.sym, strat: b.strat, rank: rank[b.id] || null, liveRank: live.indexOf(b) + 1, funded: b.alloc > 0, alloc: r4(b.alloc), equity: r4(eq),

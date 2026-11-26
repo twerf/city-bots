@@ -83,7 +83,7 @@ export const TOGGLES = {
   sharpe: { g: 'score', c: { fund: { score: 'sharpe' } } }, caps: { g: 'caps', c: { fund: { capTicker: 2, capCluster: 3 } } },
   bench: { g: 'bench', c: { fund: { bench: 3 } } }, posOnly: { g: 'pos', c: { fund: { minScore: 0 } } }, eqW: { g: 'weights', c: { fund: { weights: 'equal' } } },
 };
-function apply(cfg, name) {
+export function apply(cfg, name) {
   const t = TOGGLES[name];
   if (t.add) return { ...cfg, strats: [...cfg.strats, t.add] };
   if (t.drop) return { ...cfg, strats: cfg.strats.filter((s) => s !== t.drop) };

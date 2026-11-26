@@ -1,0 +1,21 @@
+name: weekly report card
+on:
+  schedule:
+    - cron: '15 22 * * 5' # Fridays after the close + nightly archive (5:15pm EST / 6:15pm EDT)
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: git fetch -q origin live || true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node research/data.mjs
+      - run: node research/weekly.mjs
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}

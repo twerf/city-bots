@@ -67,14 +67,18 @@ L.push(`- older days: bots ${P(growth(cur5))} (luck check ${Math.round(pAboveZer
 const beatSpy = growth(cur1) > spy1 && growth(cur5) > spy5, lucky = pAboveZero(cur1) < 0.8;
 L.push(`**Honest read:** ${lucky ? 'still can\'t tell this apart from luck' : 'starting to look like more than luck'}${beatSpy ? ', and it beat just holding SPY on both data sets.' : ', and just holding SPY did better on at least one data set.'}`);
 L.push(ideas.length ? `**Suggestions (not shipped, ask Fernandis to test):** ${ideas.slice(0, 3).map((i) => `${i.n} (+${(i.d1 * 100).toFixed(1)}% on 1-min days, +${(i.d5 * 100).toFixed(1)}% on older days, luck ${Math.round(i.luck * 100)}%)`).join('; ')}` : '**Suggestions:** none. No single tweak beat the current bots on both data sets with a solid luck check.');
+try { const sw = fs.readFileSync(new URL('./streams/week.txt', import.meta.url), 'utf8').trim(); if (sw) L.push(sw); } catch {}
 let msg = L.join('\n');
-if (msg.length > 1950) msg = msg.slice(0, 1940) + '…';
+const chunks = []; for (const ln of L) { if (!chunks.length || (chunks.at(-1) + '\n' + ln).length > 1900) chunks.push(ln.slice(0, 1900)); else chunks[chunks.length - 1] += '\n' + ln; }
 console.log(msg);
 
 if (!dry) {
   const hook = process.env.DISCORD_WEBHOOK;
   if (!hook) { console.log('DISCORD_WEBHOOK not set, not posting'); process.exit(0); }
-  const r = await fetch(hook + '?wait=true', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: msg, flags: 4, username: 'City bots' }) });
-  console.log('posted:', r.status);
-  if (!r.ok) process.exit(1);
+  for (const c of chunks) {
+    const r = await fetch(hook + '?wait=true', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: c, flags: 4, username: 'City bots' }) });
+    console.log('posted:', r.status);
+    if (!r.ok) process.exit(1);
+    await new Promise((x) => setTimeout(x, 1000));
+  }
 }

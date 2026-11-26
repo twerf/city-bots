@@ -3,3 +3,5 @@ node_modules/
 research/cache/
 research/streams/raw/
 research/streams/snippets/
+research/streams/calls_auto.json
+research/streams/scored_week.json

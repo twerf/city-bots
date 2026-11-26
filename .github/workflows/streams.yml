@@ -1,0 +1,33 @@
+name: streamer leaderboard
+on:
+  schedule:
+    - cron: '0 22 * * 5' # Fridays after the close, before the weekly report card (22:15)
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: streams
+  cancel-in-progress: false
+jobs:
+  streams:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q -U "yt-dlp[default]"
+      - run: python research/streams/weekly.py
+      - name: commit
+        run: |
+          git config user.name "city-bots"
+          git config user.email "city-bots@users.noreply.github.com"
+          git add research/streams/leaderboard.json research/streams/week.txt
+          git diff --cached --quiet && exit 0
+          git commit -q -m "streamer leaderboard $(date -u +%F)"
+          for i in 1 2 3; do git pull -q --rebase && git push -q && exit 0; sleep 5; done
+          exit 1

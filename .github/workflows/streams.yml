@@ -1,7 +1,7 @@
+# YouTube blocks GitHub's servers, so the weekly run happens on the laptop (research/streams/run_weekly.cmd via Task Scheduler).
+# This workflow is kept for manual runs only.
 name: streamer leaderboard
 on:
-  schedule:
-    - cron: '0 22 * * 5' # Fridays after the close, before the weekly report card (22:15)
   workflow_dispatch:
 permissions:
   contents: write

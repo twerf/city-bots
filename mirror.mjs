@@ -128,6 +128,20 @@ export async function mirrorTick(M) {
     await placeLimit(M, { kind: 'buy', sym: c.symbol, under: e.bot.sym, side: e.side, bot: e.bot.id, qty, limit: r2(mid), mid, bid: x.bp, ask: x.ap, why: `${e.bot.name}: ${e.why}` });
   }
 }
+
+// straight-from-Alpaca snapshot for the City tab (account, positions, recent orders, equity history).
+// The browser can't call Alpaca (the keys would be public), so the runner copies this into city.json.
+export async function alpacaSnapshot(M) {
+  const a = await assertPaper();
+  const [pos, ord, hist] = await Promise.all([T('/positions'), T('/orders?status=all&limit=25&direction=desc'), T('/account/portfolio/history?period=1M&timeframe=1D').catch(() => null)]);
+  M.snap = { at: Date.now(), equity: +a.equity, cash: +a.cash, buyingPower: +a.buying_power, lastEquity: +a.last_equity, status: a.status,
+    positions: pos.map((p) => ({ sym: p.symbol, qty: +p.qty, side: p.side, avg: +p.avg_entry_price, price: +p.current_price, value: +p.market_value, upl: +p.unrealized_pl, uplpc: +p.unrealized_plpc })),
+    orders: ord.map((o) => ({ sym: o.symbol, side: o.side, qty: +o.qty, type: o.type, limit: o.limit_price == null ? null : +o.limit_price, status: o.status, filled: o.filled_avg_price == null ? null : +o.filled_avg_price, at: o.submitted_at })),
+    history: hist ? hist.timestamp.map((t, i) => [t, hist.equity[i]]).filter((x) => x[1] != null) : [] };
+  if (M.startEq == null) M.startEq = +a.equity;
+  M.lastEq = +a.equity;
+  return M.snap;
+}
 export function mirrorView(M) {
   if (!M) return null;
   const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
@@ -135,5 +149,5 @@ export function mirrorView(M) {
     spy: M.spy0 && M.lastSpy ? r4(M.lastSpy / M.spy0 - 1) : null, locked: M.locked, err: M.err, rules: RULES,
     open: Object.values(M.open).map((p) => ({ sym: p.sym, under: p.under, side: p.side > 0 ? 'call' : 'put', qty: p.qty, entry: p.entry, last: r2(p.last), pct: r4((p.last / p.entry - 1) * 100), why: p.why })),
     trades: M.trades.slice(0, 30), log: M.log.slice(0, 40), days: M.days.slice(-10), n: M.trades.length, wins: M.trades.filter((t) => t.pnl > 0).length,
-    avgSpread: avg(M.spreads), avgSlip: avg(M.slips) };
+    avgSpread: avg(M.spreads), avgSlip: avg(M.slips), alpaca: M.snap || null };
 }

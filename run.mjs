@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { freshState, publicView, tick, warmup, totalEquity, VERSION, SHIPPED } from './city.mjs';
-import { mirrorEnabled, mirrorTick, mirrorView, freshMirror } from './mirror.mjs';
+import { mirrorEnabled, mirrorTick, mirrorView, freshMirror, alpacaSnapshot } from './mirror.mjs';
 
 const REPO = process.env.REPO || 'twerf/city-bots';
 const TOKEN = process.env.GITHUB_TOKEN;
@@ -60,6 +60,7 @@ while (true) {
   try { await tick(S, st); st.err = null; }
   catch (e) { st.err = String(e.message).slice(0, 200); log('tick error', st.err); }
   if (MS && st.open) { try { await mirrorTick(MS); MS.err = null; } catch (e) { MS.err = String(e.message).slice(0, 200); log('mirror error', MS.err); } }
+  if (MS && (n % 3 === 0 || !st.open)) { try { await alpacaSnapshot(MS); } catch (e) { log('alpaca snapshot failed', String(e.message).slice(0, 150)); } }
   const now = Date.now();
   if (n++ % 5 === 0) await checkReset();
   publish(false);

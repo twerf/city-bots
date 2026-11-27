@@ -1,0 +1,27 @@
+name: keeper
+# Always-on relay that starts the bots before every market open (GitHub's cron alone proved unreliable).
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 */4 * * *' # backup: restarts the chain if it ever breaks (only one keeper runs at a time)
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: keeper
+  cancel-in-progress: false
+jobs:
+  keep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node keeper.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          ALPACA_KEY: ${{ secrets.ALPACA_KEY }}
+          ALPACA_SECRET: ${{ secrets.ALPACA_SECRET }}

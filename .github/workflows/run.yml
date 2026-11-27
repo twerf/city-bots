@@ -11,6 +11,7 @@ on:
         default: '345'
 permissions:
   contents: write
+  actions: write
 concurrency:
   group: city
   cancel-in-progress: false
@@ -31,3 +32,8 @@ jobs:
           MAX_MIN: ${{ inputs.max_min || '345' }}
           ALPACA_KEY: ${{ secrets.ALPACA_KEY }}
           ALPACA_SECRET: ${{ secrets.ALPACA_SECRET }}
+      - name: hand off to the next run (GitHub's cron is unreliable)
+        if: always()
+        run: if [ -f again ]; then gh workflow run run.yml -R ${{ github.repository }}; fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

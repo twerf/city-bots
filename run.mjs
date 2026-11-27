@@ -68,7 +68,7 @@ while (true) {
   const holding = S.bots.some((b) => b.bs.pos) || (MS && Date.now() < (st.closeAt || 0) + 600000 && (Object.keys(MS.open).length > 0 || MS.orders.length > 0));
   if (st.closeAt && now >= st.closeAt + 60000 && !holding) { log('session over'); break; }
   if (st.openAt && now < st.openAt && st.openAt - now > PRE_OPEN_WAIT_MS) { log('too early, next open', new Date(st.openAt).toISOString()); break; }
-  if (now - T0 > MAX_MS) { log('time box reached, handing off to the next run'); break; }
+  if (now - T0 > MAX_MS) { log('time box reached, handing off to the next run'); fs.writeFileSync('again', '1'); break; }
   if (st.err && n > 20 && !st.closeAt) { log('cannot reach market data, giving up'); break; }
   await sleep(60000 - (Date.now() % 60000) + 3000); // just after each new 1-minute bar
 }

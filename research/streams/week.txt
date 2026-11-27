@@ -1,4 +1,4 @@
 **Streamer leaderboard** (rule-based, no AI: host calls like "I'll take Tesla puts", scored on the stock 1 hour later)
 - TraderTV Live: this week 1/2 right after 1h (50%), avg -0.17% · all-time 1/2 right after 1h (50%), avg -0.17% (too few to judge)
-- SmartAction Trading: this week 4/14 right after 1h (29%), avg -0.80% · all-time 4/14 right after 1h (29%), avg -0.80% (too few to judge)
+- SmartAction Trading: this week 3/11 right after 1h (27%), avg -0.86% · all-time 4/14 right after 1h (29%), avg -0.80% (too few to judge)
 A coin flip is 50%. Under 30 calls means it could easily be luck.
